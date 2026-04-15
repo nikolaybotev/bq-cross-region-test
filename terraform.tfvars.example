@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) and adjust.
+# gcloud config set project feelinsosweet
+
+gcp_project_id = "YOUR_GCP_PROJECT_ID"
+
+# Optional: shorten or change if key ring names collide in the project
+# name_prefix = "bq-cross-region-test"

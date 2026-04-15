@@ -1,0 +1,34 @@
+# Local .terraform directories
+/.terraform/
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Ignore override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Transient lock info
+.terraform.tfstate.lock.info
+
+# Plan files
+*.tfplan
+
+# CLI configuration files
+.terraformrc
+terraform.rc
+
+# Mac
+.DS_Store
+
+# Project-specific secrets / local configuration (use terraform.tfvars.example as template)
+terraform.tfvars
+*.auto.tfvars
+*.auto.tfvars.json

@@ -1,5 +1,6 @@
 locals {
   required_apis = [
+    "serviceusage.googleapis.com",
     "bigquery.googleapis.com",
     "cloudkms.googleapis.com",
     "bigquerydatatransfer.googleapis.com",

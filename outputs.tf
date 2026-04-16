@@ -30,3 +30,13 @@ output "sample_table" {
   description = "Plain (non-CMEK) source table — same as sample_tables[\"plain\"]"
   value       = "${var.gcp_project_id}.source_us_east4.sample_cross_region_test"
 }
+
+output "dts_incremental_dest_table" {
+  description = "Destination for the daily scheduled_query in dts.tf (explicit US CMEK via encryption_configuration)"
+  value       = "${var.gcp_project_id}.${google_bigquery_dataset.dest_us.dataset_id}.${google_bigquery_table.dts_dest_cmek_incremental.table_id}"
+}
+
+output "dts_transfer_config_name" {
+  description = "Full resource name of the BigQuery Data Transfer scheduled_query config"
+  value       = google_bigquery_data_transfer_config.incremental_cmek_scheduled_query.name
+}

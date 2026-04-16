@@ -2,7 +2,7 @@
 
 Terraform for a small GCP footprint used to exercise **BigQuery Data Transfer Service** and **cross-region replication** manually in the Google Cloud Console. This repo only creates the underlying datasets, KMS keys, and a seeded sample table—not the transfers or replication jobs themselves.
 
-**Manual test results** (DTS vs CRR, CMEK combinations): [docs/CROSS_REGION_TEST_REPORT.md](docs/CROSS_REGION_TEST_REPORT.md).
+**Manual test results** (DTS, cross-region **`bq cp`**, CRR, CMEK combinations): [docs/CROSS_REGION_TEST_REPORT.md](docs/CROSS_REGION_TEST_REPORT.md).
 
 ## What gets created
 

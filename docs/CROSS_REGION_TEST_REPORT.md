@@ -7,32 +7,32 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 | Source CMEK | Dest CMEK | DTS | `bq cp` | CRR | CRR (secondary) |
 |-------------|-----------|-----|---------|------|-----------------|
 | Yes | Yes | ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail |
-| Yes | No | ❌ Fail | ✅ Pass | ✅ Pass | ❌ Fail |
-| No | Yes | ❌ Fail | ✅ Pass | ✅ Pass | ❌ Fail |
+| Yes | No | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
+| No | Yes | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
 | No | No | ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail |
 
-Cross-region `bq cp` for `sample_cross_region_test` (project `feelinsosweet`), matching each CMEK row—fill the **`bq cp`** column after you run them:
+Cross-region **`bq cp`** (`us-east1` → `us-east4`) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east1*` suffix to distinguish scenarios. **`bq cp`** matches **DTS** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery’s errors describe.
 
 ```bash
 # Yes / Yes — CMEK → CMEK
 bq cp -f \
   feelinsosweet:source_us_east1_cmek.sample_cross_region_test \
-  feelinsosweet:dest_us_east4_cmek.sample_cross_region_test_1
+  feelinsosweet:dest_us_east4_cmek.from_us_east1_cmek
 
 # Yes / No — CMEK source → non-CMEK dest
 bq cp -f \
   feelinsosweet:source_us_east1_cmek.sample_cross_region_test \
-  feelinsosweet:dest_us_east4.sample_cross_region_test_1
+  feelinsosweet:dest_us_east4.from_us_east1_cmek
 
 # No / Yes — non-CMEK source → CMEK dest
 bq cp -f \
   feelinsosweet:source_us_east1.sample_cross_region_test \
-  feelinsosweet:dest_us_east4_cmek.sample_cross_region_test_2
+  feelinsosweet:dest_us_east4_cmek.from_us_east1
 
 # No / No — non-CMEK → non-CMEK
 bq cp -f \
   feelinsosweet:source_us_east1.sample_cross_region_test \
-  feelinsosweet:dest_us_east4.sample_cross_region_test_2
+  feelinsosweet:dest_us_east4.from_us_east1
 ```
 
 Terraform only creates `sample_cross_region_test` in `source_us_east1`. For the two **Yes** rows in “Source CMEK”, copy or CTAS that table into `source_us_east1_cmek` first (same name), then run the matching `bq cp` above.
@@ -44,10 +44,11 @@ Terraform only creates `sample_cross_region_test` in `source_us_east1`. For the 
 ## Observations
 
 1. **DTS** succeeded only when **source and destination CMEK usage matched** (both CMEK or both non-CMEK). It failed when one side used CMEK and the other did not.
-2. **CRR** succeeded in **all four** combinations of source/destination CMEK.
-3. **CRR (secondary)** failed in every run: with the source-region replica still **secondary** in the destination dataset, copy/load into the destination was not possible. **Promoting that replica to primary** in the destination dataset is required before those operations can succeed.
+2. **`bq cp`** (cross-region **`us-east1` → `us-east4`**) follows the **same CMEK pairing rule as DTS**: Pass in the **Yes / Yes** and **No / No** rows; Fail in the mixed rows, with BigQuery errors about CMEK unless you supply a destination key or do an in-region CMEK copy first.
+3. **CRR** succeeded in **all four** combinations of source/destination CMEK.
+4. **CRR (secondary)** failed in every run: with the source-region replica still **secondary** in the destination dataset, copy/load into the destination was not possible. **Promoting that replica to primary** in the destination dataset is required before those operations can succeed.
 
-4. **Cross-region CTAS** (empirical): for `CREATE TABLE … AS SELECT` across regions to work, the dataset you read from needs a **replica in the region where the destination dataset’s primary lives**.
+5. **Cross-region CTAS** (empirical): for `CREATE TABLE … AS SELECT` across regions to work, the dataset you read from needs a **replica in the region where the destination dataset’s primary lives**.
 
 ### Why CRR (secondary) fails: secondary replicas are read-only
 

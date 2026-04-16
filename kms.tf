@@ -41,14 +41,15 @@ resource "google_kms_crypto_key" "us_east4_bq_default" {
 }
 
 # BigQuery service agent needs to use the keys for default encryption on datasets.
+# as per https://docs.cloud.google.com/bigquery/docs/customer-managed-encryption#assign_role
 resource "google_kms_crypto_key_iam_member" "bq_service_agent_us_east1" {
   crypto_key_id = google_kms_crypto_key.us_east1_bq_default.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquery.iam.gserviceaccount.com"
+  member        = "serviceAccount:bq-${data.google_project.current.number}@bigquery-encryption.iam.gserviceaccount.com"
 }
 
 resource "google_kms_crypto_key_iam_member" "bq_service_agent_us_east4" {
   crypto_key_id = google_kms_crypto_key.us_east4_bq_default.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquery.iam.gserviceaccount.com"
+  member        = "serviceAccount:bq-${data.google_project.current.number}@bigquery-encryption.iam.gserviceaccount.com"
 }

@@ -7,4 +7,5 @@
 # - outputs.tf
 # - providers.tf  — Terraform and Google provider
 # - variables.tf
+# - docs/CROSS_REGION_TEST_REPORT.md — manual DTS / CRR test matrix
 #

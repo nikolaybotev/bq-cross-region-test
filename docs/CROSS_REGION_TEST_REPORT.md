@@ -21,11 +21,11 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 2. **CRR** succeeded in **all four** combinations of source/destination CMEK.
 3. **CRR (secondary)** failed in every run: with the source-region replica still **secondary** in the destination dataset, copy/load into the destination was not possible. **Promoting that replica to primary** in the destination dataset is required before those operations can succeed.
 
-4. **Cross-region CTAS** (empirical): for `CREATE TABLE … AS SELECT` across regions to work, the dataset you read from needs a **replica in the region where the destination dataset’s primary lives**. That constraint is easy to miss because replication and “where the query runs” are not obvious in the UI.
+4. **Cross-region CTAS** (empirical): for `CREATE TABLE … AS SELECT` across regions to work, the dataset you read from needs a **replica in the region where the destination dataset’s primary lives**.
 
-## CTAS cross-region transfer — final pattern
+## CTAS cross-region transfer
 
-**Goal:** Move data from a **us-east4**-only source to a **US** multi-region destination using CTAS, without relying on DTS for the whole path.
+**Goal:** Move data from a **us-east4**-only source to a **US**-only destination using CTAS, without relying on DTS for the whole path, so as to avoid the DTS CMEK restrictions.
 
 **Layout (three datasets):**
 
@@ -33,22 +33,22 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 2. **Intermediate dataset** — **us-east4** is **primary**; **US** is a **replica** (same logical dataset, two regional footprints).
 3. **Destination dataset** — region **US** only; **no** replicas.
 
-**Where each dataset lives (replicas vs primaries):**
+**Overview (three datasets, left to right):**
 
 ```mermaid
-flowchart TB
-  subgraph e4["us-east4"]
-    direction TB
-    SRC["Source dataset\n(single region, no replicas)"]
-    INT_P["Intermediate dataset — primary"]
-  end
-  subgraph us["US (multi-region)"]
-    direction TB
-    INT_R["Intermediate dataset — replica"]
-    DST["Destination dataset\n(US only, no replicas)"]
-  end
-  INT_P -. "same dataset, CRR" .-> INT_R
+flowchart LR
+  SRC["Source DataSet<br/>us-east4"]
+  INT["Intermediate DataSet<br/>us-east4 (Primary)<br/>US (replica)"]
+  DST["Destination DataSet<br/>US"]
+  SRC --> INT
+  INT --> DST
 ```
+
+The intermediate dataset is one logical dataset: **primary** in **us-east4** and a **replica** in **US** (cross-region replication between those footprints). Arrows are the intended data movement (CTAS steps detailed below).
+
+Original sketch:
+
+![Hand-drawn three-box layout](ctas-three-dataset-sketch.png)
 
 **CTAS sequence (two writes; replication is automatic between them):**
 

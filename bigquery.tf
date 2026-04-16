@@ -71,7 +71,7 @@ resource "google_bigquery_dataset" "dest_us_east4_cmek" {
 # Seeds a small native table in the plain us-east1 source dataset for Console copy / transfer tests.
 resource "google_bigquery_job" "sample_cross_region_test" {
   project  = var.gcp_project_id
-  job_id   = "tf_sample_${substr(md5("${var.gcp_project_id}-source_us_east1-sample_cross_region_test-v1"), 0, 12)}"
+  job_id   = "tf_sample_${substr(md5("${var.gcp_project_id}-source_us_east1-sample_cross_region_test-v3"), 0, 12)}"
   location = "us-east1"
 
   query {
@@ -84,8 +84,11 @@ resource "google_bigquery_job" "sample_cross_region_test" {
       ])
     EOT
 
+    # Required for DDL: BigQuery rejects jobs that set disposition on CREATE/DDL statements.
     allow_large_results = false
     use_legacy_sql      = false
+    create_disposition  = ""
+    write_disposition   = ""
   }
 
   depends_on = [google_bigquery_dataset.source_us_east1]

@@ -1,6 +1,6 @@
 # Cross-region BigQuery test report
 
-Manual tests performed in the Google Cloud Console using datasets and KMS keys provisioned by this repository’s Terraform (`us-east1` sources → `us-east4` destinations). Project: **feelinsosweet**.
+Manual tests performed in the Google Cloud Console using datasets and KMS keys provisioned by this repository’s Terraform (**`us-east4`** sources → **`US`** multi-region destinations). Project: **feelinsosweet**.
 
 ## Scenarios
 
@@ -11,31 +11,31 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 | No | Yes | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
 | No | No | ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail |
 
-Cross-region **`bq cp`** (`us-east1` → `us-east4`) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east1*` suffix to distinguish scenarios. **`bq cp`** matches **DTS** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery’s errors describe.
+Cross-region **`bq cp`** (**`us-east4` → `US`**) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east4*` suffix to distinguish scenarios. **`bq cp`** matches **DTS** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery’s errors describe.
 
 ```bash
 # Yes / Yes — CMEK → CMEK
 bq cp -f \
-  feelinsosweet:source_us_east1_cmek.sample_cross_region_test \
-  feelinsosweet:dest_us_east4_cmek.from_us_east1_cmek
+  feelinsosweet:source_us_east4_cmek.sample_cross_region_test \
+  feelinsosweet:dest_us_cmek.from_us_east4_cmek
 
 # Yes / No — CMEK source → non-CMEK dest
 bq cp -f \
-  feelinsosweet:source_us_east1_cmek.sample_cross_region_test \
-  feelinsosweet:dest_us_east4.from_us_east1_cmek
+  feelinsosweet:source_us_east4_cmek.sample_cross_region_test \
+  feelinsosweet:dest_us.from_us_east4_cmek
 
 # No / Yes — non-CMEK source → CMEK dest
 bq cp -f \
-  feelinsosweet:source_us_east1.sample_cross_region_test \
-  feelinsosweet:dest_us_east4_cmek.from_us_east1
+  feelinsosweet:source_us_east4.sample_cross_region_test \
+  feelinsosweet:dest_us_cmek.from_us_east4
 
 # No / No — non-CMEK → non-CMEK
 bq cp -f \
-  feelinsosweet:source_us_east1.sample_cross_region_test \
-  feelinsosweet:dest_us_east4.from_us_east1
+  feelinsosweet:source_us_east4.sample_cross_region_test \
+  feelinsosweet:dest_us.from_us_east4
 ```
 
-Terraform only creates `sample_cross_region_test` in `source_us_east1`. For the two **Yes** rows in “Source CMEK”, copy or CTAS that table into `source_us_east1_cmek` first (same name), then run the matching `bq cp` above.
+Terraform creates partitioned `sample_cross_region_test` in both **`source_us_east4`** and **`source_us_east4_cmek`** (same query template). The **Yes / Yes** and **Yes / No** `bq cp` commands can run against the CMEK source table directly.
 
 - **DTS**: BigQuery Data Transfer Service.
 - **CRR**: Cross-region replication when the source-region replica in the destination dataset is the **primary** replica (copying into the destination works in these tests).
@@ -44,7 +44,7 @@ Terraform only creates `sample_cross_region_test` in `source_us_east1`. For the 
 ## Observations
 
 1. **DTS** succeeded only when **source and destination CMEK usage matched** (both CMEK or both non-CMEK). It failed when one side used CMEK and the other did not.
-2. **`bq cp`** (cross-region **`us-east1` → `us-east4`**) follows the **same CMEK pairing rule as DTS**: Pass in the **Yes / Yes** and **No / No** rows; Fail in the mixed rows, with BigQuery errors about CMEK unless you supply a destination key or do an in-region CMEK copy first.
+2. **`bq cp`** (cross-region **`us-east4` → `US`**) follows the **same CMEK pairing rule as DTS**: Pass in the **Yes / Yes** and **No / No** rows; Fail in the mixed rows, with BigQuery errors about CMEK unless you supply a destination key or do an in-region CMEK copy first.
 3. **CRR** succeeded in **all four** combinations of source/destination CMEK.
 4. **CRR (secondary)** failed in every run: with the source-region replica still **secondary** in the destination dataset, copy/load into the destination was not possible. **Promoting that replica to primary** in the destination dataset is required before those operations can succeed.
 
@@ -54,11 +54,11 @@ Terraform only creates `sample_cross_region_test` in `source_us_east1`. For the 
 
 For a dataset that uses cross-region replication, only the **primary** replica accepts **writes** (new tables, loads, CTAS that materialize in that dataset, `bq cp` into that dataset, etc.). **Secondary** replicas are **read-only**: reads are fine, but anything that would **write** through the secondary regional footprint is rejected until that replica is promoted to primary.
 
-One check used dataset **`dest_us_east4_primary`**, created in the Console with **primary** in **us-east4** and a **secondary** replica in **us-east1** (the source side matches the Terraform-style single-region datasets in this project). A CTAS with `SET @@location='us-east1';` targeting `dest_us_east4_primary` tries to write while the job runs in **us-east1**, i.e. against the **secondary** replica. BigQuery returns an error like:
+One check used a dataset with **primary** in **`US`** and a **secondary** replica in **`us-east4`**. A CTAS with `SET @@location='us-east4';` targeting that destination tries to write while the job runs in **`us-east4`**, i.e. against the **secondary** replica. BigQuery returns an error like:
 
-> Invalid value: The dataset replica of the cross region dataset 'feelinsosweet:dest_us_east4_primary' in region 'us-east1' is read-only because it's not the primary replica.
+> Invalid value: The dataset replica of the cross region dataset '…' in region 'us-east4' is read-only because it's not the primary replica.
 
-The dataset **Details** UI lists the same: **Secondary** in `us-east1` with **Make it primary**, and **Primary (Creation region)** in `us-east4`. Until the replica in the region where you need writes is primary, **CRR (secondary)** stays a failed path for copy/load/CTAS into that destination from that region.
+The dataset **Details** UI lists **Secondary** in `us-east4` with **Make it primary**, and **Primary** in **`US`**. Until the replica in the region where you need writes is primary, **CRR (secondary)** stays a failed path for copy/load/CTAS into that destination from that region.
 
 ## CTAS cross-region transfer
 
@@ -101,7 +101,7 @@ flowchart LR
 ```
 
 - ① loads the intermediate **primary** in **us-east4**. After **CRR** materializes the **US** replica.
-- ② runs in **US** so the read side matches the destination dataset’s region and the cross-region CTAS rule in observation 4 holds.
+- ② runs in **US** so the read side matches the destination dataset’s region and the cross-region CTAS rule in observation 5 holds.
 
 ## Global queries (alternative to CRR for cross-region CTAS)
 

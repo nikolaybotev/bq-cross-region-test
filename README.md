@@ -8,9 +8,9 @@ Terraform for a small GCP footprint used to exercise **BigQuery Data Transfer Se
 
 | Resource | Notes |
 |----------|--------|
-| **Datasets** | `source_us_east1`, `source_us_east1_cmek` (both `us-east1`); `dest_us_east4`, `dest_us_east4_cmek` (both `us-east4`). |
-| **CMEK** | Key rings and symmetric keys in `us-east1` and `us-east4`; `_cmek` datasets use those keys as default encryption. IAM grants the BigQuery service agent `roles/cloudkms.cryptoKeyEncrypterDecrypter` on each key. |
-| **Sample data** | Table `sample_cross_region_test` in `source_us_east1` (three rows: `id`, `label`, `created_at`), created via a query job. |
+| **Datasets** | `source_us_east4`, `source_us_east4_cmek` (both **`us-east4`**); `dest_us`, `dest_us_cmek` (both **`US`** multi-region). |
+| **CMEK** | Key rings in **`us-east4`** (source) and multi-region **`us`** (US destination, per BigQuery CMEK requirements). `_cmek` datasets use those keys as default encryption. IAM grants the BigQuery encryption service account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on each key. |
+| **Sample data** | Table `sample_cross_region_test` in **`source_us_east4`** and **`source_us_east4_cmek`** (same schema), **partitioned by `DATE(created_at)`** with three rows on three days (three partitions). Created via query jobs (`local.sample_cross_region_test_query` in `bigquery.tf`). |
 | **APIs** | Service Usage, BigQuery, Cloud KMS, BigQuery Data Transfer (plus whatever Terraform needs to manage project services). |
 
 ## Prerequisites
@@ -23,7 +23,7 @@ Terraform for a small GCP footprint used to exercise **BigQuery Data Transfer Se
 
 1. Copy `terraform.tfvars.example` to `terraform.tfvars` (that filename is gitignored).
 2. Set `gcp_project_id` to your GCP project ID.
-3. Optionally set `name_prefix` if KMS resource names collide with existing key rings or keys in the same regions.
+3. Optionally set `name_prefix` if KMS resource names collide with existing key rings or keys in the same locations.
 
 ## Usage
 
@@ -39,7 +39,7 @@ Outputs include fully qualified dataset IDs, KMS key IDs, and the sample table n
 
 - `apis.tf` — Project API enablement and `google_project` data source
 - `bigquery.tf` — Datasets and sample table seed job
-- `kms.tf` — Regional key rings, crypto keys, and KMS IAM for BigQuery
+- `kms.tf` — KMS key rings (`us-east4`, multi-region `us`), crypto keys, and KMS IAM for BigQuery
 - `main.tf` — File index
 - `outputs.tf`, `providers.tf`, `variables.tf`
 

@@ -93,7 +93,7 @@ resource "google_bigquery_job" "sample_cross_region_test" {
   for_each = local.sample_cross_region_test_seed
 
   project  = var.gcp_project_id
-  job_id   = "tf_sample_${substr(md5("${var.gcp_project_id}-${each.key}-sample_cross_region_test-v7"), 0, 12)}"
+  job_id   = "tf_sample_${substr(md5("${var.gcp_project_id}-${each.key}-sample_cross_region_test-v9"), 0, 12)}"
   location = "us-east4"
 
   query {
@@ -104,6 +104,14 @@ resource "google_bigquery_job" "sample_cross_region_test" {
     use_legacy_sql      = false
     create_disposition  = ""
     write_disposition   = ""
+
+    # Match the CMEK job’s stored encryption (same as dataset default) so Terraform does not null it and force replacement.
+    dynamic "destination_encryption_configuration" {
+      for_each = each.key == "cmek" ? [1] : []
+      content {
+        kms_key_name = google_kms_crypto_key.us_east4_bq_default.id
+      }
+    }
   }
 
   depends_on = [

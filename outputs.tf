@@ -40,3 +40,21 @@ output "dts_transfer_config_name" {
   description = "Full resource name of the BigQuery Data Transfer scheduled_query config"
   value       = google_bigquery_data_transfer_config.incremental_cmek_scheduled_query.name
 }
+
+output "dts_ondemand_select_configs" {
+  description = "On-demand scheduled_query DTS configs (no CMEK vs per-param CMEK)"
+  value = {
+    plain = google_bigquery_data_transfer_config.ondemand_select_plain.name
+    ec    = google_bigquery_data_transfer_config.ondemand_select_ec.name
+    ec_cmek  = google_bigquery_data_transfer_config.ondemand_select_ec_cmek.name
+  }
+}
+
+output "dts_ondemand_select_dest_tables" {
+  description = "Destination tables created/populated by the on-demand DQL transfers"
+  value = {
+    plain = "${var.gcp_project_id}.${google_bigquery_dataset.dest_us.dataset_id}.${local.dts_select_plain_table_id}"
+    ec    = "${var.gcp_project_id}.${google_bigquery_dataset.dest_us.dataset_id}.${local.dts_select_ec_table_id}"
+    ec_cmek  = "${var.gcp_project_id}.${google_bigquery_dataset.dest_us.dataset_id}.${local.dts_select_ec_cmek_table_id}"
+  }
+}

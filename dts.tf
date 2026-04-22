@@ -108,8 +108,8 @@ resource "google_bigquery_data_transfer_config" "incremental_cmek_scheduled_quer
   destination_dataset_id = google_bigquery_dataset.dest_us.dataset_id
 
   params = {
-    write_disposition               = "WRITE_APPEND"
-    query                           = local.dts_incremental_merge_query
+    write_disposition = "WRITE_APPEND"
+    query             = local.dts_incremental_merge_query
   }
 
   encryption_configuration {
@@ -125,4 +125,124 @@ resource "google_bigquery_data_transfer_config" "incremental_cmek_scheduled_quer
     google_kms_crypto_key_iam_member.bq_service_agent_us_multi,
     google_bigquery_table.dts_dest_cmek_incremental,
   ]
+}
+
+# ---------------------------------------------------------------------------
+# On-demand scheduled_query DTS jobs — DQL (SELECT) variants.
+# Deliberately different from the MERGE variant above:
+#   1) on-demand (disable_auto_scheduling = true) — runs only on manual backfill
+#   2) SELECT DQL with @run_date runtime parameter so DTS routes rows per partition
+#   3) Uses the native `scheduled_query` data source params from the data source schema
+#      (destination_table_name_template / write_disposition / partitioning_field /
+#      destination_table_kms_key) — NOT DDL/DML like MERGE
+#   4) Single shared destination table partitioned by created_at (not one per run)
+#
+# Two jobs below to observe CMEK on/off side by side:
+#   * ondemand_select_plain → no `destination_table_kms_key`, no encryption_configuration.
+#     dest_us has no default CMEK, so DTS should create the destination table as plaintext.
+#   * ondemand_select_cmek  → sets `destination_table_kms_key` in params only. DTS should
+#     create the destination table with that CMEK.
+#
+# Two CMEK knobs exist for scheduled_query and they mean different things:
+#   - encryption_configuration.kms_key_name (TransferConfig field; `bq mk --destination_kms_key`)
+#     → DTS-level CMEK; covers intermediate on-disk cache AND is propagated to destination tables.
+#     Sticky: cannot be added later to a non-CMEK transfer; can only be updated if originally set.
+#   - params.destination_table_kms_key (scheduled_query data source param; shown in the DTS
+#     console under "Advanced options → Destination table KMS key")
+#     → Only applies to the destination table the query writes to; does not cover the cache.
+# We use the per-param knob below because that is what the data source schema exposes.
+#
+# Runtime parameters supported by scheduled_query: @run_time (TIMESTAMP), @run_date (DATE).
+# https://cloud.google.com/bigquery/docs/scheduling-queries
+#
+# EXPECTED FAILURE (cross-region): same root cause as the MERGE variant — the query still
+# runs in the config's location (US), so reading the us-east4 source will not work.
+
+locals {
+  dts_select_plain_table_id = "dts_sq_select_plain"
+  dts_select_ec_table_id    = "dts_sq_select_ec"
+  dts_select_ec_cmek_table_id = "dts_sq_select_ec_cmek"
+
+  # @run_date is a DATE parameter automatically injected by DTS.
+  dts_select_run_date_query = <<-SQL
+SELECT id, label, created_at
+FROM `${var.gcp_project_id}.${google_bigquery_dataset.source_us_east4_cmek.dataset_id}.sample_cross_region_test`
+WHERE DATE(created_at) = @run_date
+SQL
+}
+
+# NOTE: these DQL jobs do NOT pre-create the destination table. Per
+# https://cloud.google.com/bigquery/docs/scheduling-queries :
+#   "If the destination table for your results doesn't exist when you set up the scheduled
+#    query, BigQuery attempts to create the table for you."
+# With `partitioning_field = "created_at"` DTS creates a time-unit column partitioned table
+# on first run, maps the SELECT schema, then WRITE_APPENDs subsequent runs.
+
+resource "google_bigquery_data_transfer_config" "ondemand_select_plain" {
+  display_name   = "${var.name_prefix}-ondemand-select-plain"
+  location       = "US"
+  data_source_id = "scheduled_query"
+
+  service_account_name   = google_service_account.dts_scheduled_query_runner.email
+  destination_dataset_id = google_bigquery_dataset.dest_us.dataset_id
+
+  schedule_options {
+    disable_auto_scheduling = true
+  }
+
+  params = {
+    query                           = local.dts_select_run_date_query
+    destination_table_name_template = local.dts_select_plain_table_id
+    write_disposition               = "WRITE_APPEND"
+    partitioning_field              = "created_at"
+  }
+}
+
+resource "google_bigquery_data_transfer_config" "ondemand_select_ec" {
+  display_name   = "${var.name_prefix}-ondemand-select-ec"
+  location       = "US"
+  data_source_id = "scheduled_query"
+
+  service_account_name   = google_service_account.dts_scheduled_query_runner.email
+  destination_dataset_id = google_bigquery_dataset.dest_us.dataset_id
+
+  schedule_options {
+    disable_auto_scheduling = true
+  }
+
+  encryption_configuration {
+    kms_key_name = google_kms_crypto_key.us_multi_bq_default.id
+  }
+
+  params = {
+    query                           = local.dts_select_run_date_query
+    destination_table_name_template = local.dts_select_ec_table_id
+    write_disposition               = "WRITE_APPEND"
+    partitioning_field              = "created_at"
+  }
+}
+
+resource "google_bigquery_data_transfer_config" "ondemand_select_ec_cmek" {
+  display_name   = "${var.name_prefix}-ondemand-select-ec-cmek"
+  location       = "US"
+  data_source_id = "scheduled_query"
+
+  service_account_name   = google_service_account.dts_scheduled_query_runner.email
+  destination_dataset_id = google_bigquery_dataset.dest_us.dataset_id
+
+  schedule_options {
+    disable_auto_scheduling = true
+  }
+
+  encryption_configuration {
+    kms_key_name = google_kms_crypto_key.us_multi_bq_default.id
+  }
+
+  params = {
+    query                           = local.dts_select_run_date_query
+    destination_table_name_template = local.dts_select_ec_cmek_table_id
+    write_disposition               = "WRITE_APPEND"
+    partitioning_field              = "created_at"
+    destination_table_kms_key       = google_kms_crypto_key.us_multi_bq_default.id
+  }
 }

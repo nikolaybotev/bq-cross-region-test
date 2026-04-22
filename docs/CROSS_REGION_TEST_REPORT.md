@@ -4,14 +4,16 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 
 ## Scenarios
 
-| Source CMEK | Dest CMEK | DTS | `bq cp` | CRR | CRR (secondary) |
-|-------------|-----------|-----|---------|------|-----------------|
-| Yes | Yes | ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail |
-| Yes | No | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
-| No | Yes | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
-| No | No | ✅ Pass | ✅ Pass | ✅ Pass | ❌ Fail |
+| Source CMEK | Dest CMEK | DTS `cross_region_copy` | DTS `scheduled_query` | `bq cp` | CRR | CRR (secondary) |
+|-------------|-----------|-------------------------|-----------------------|---------|-----|-----------------|
+| Yes | Yes | ✅ Pass | ❌ Fail | ✅ Pass | ✅ Pass | ❌ Fail |
+| Yes | No  | ❌ Fail | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
+| No  | Yes | ❌ Fail | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
+| No  | No  | ✅ Pass | ❌ Fail | ✅ Pass | ✅ Pass | ❌ Fail |
 
-Cross-region **`bq cp`** (**`us-east4` → `US`**) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east4*` suffix to distinguish scenarios. **`bq cp`** matches **DTS** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery’s errors describe.
+The **DTS** column has been split: **`cross_region_copy`** is the dataset-level copy data source (what the console "Copy dataset" flow uses and what `dts_console_imported.tf` wires), while **`scheduled_query`** is the per-query data source (what `dts.tf` wires for the MERGE and the three on-demand SELECT variants). `scheduled_query` **fails in every CMEK combination cross-region** — not for CMEK reasons, but because the TransferConfig's `location` is pinned to the destination dataset's region and the query job therefore cannot read a table that lives in the source region. See **observation 6** below and the dedicated finding in §1.
+
+Cross-region **`bq cp`** (**`us-east4` → `US`**) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east4*` suffix to distinguish scenarios. **`bq cp`** matches **DTS `cross_region_copy`** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery's errors describe.
 
 ```bash
 # Yes / Yes — CMEK → CMEK
@@ -37,14 +39,15 @@ bq cp -f \
 
 Terraform creates partitioned `sample_cross_region_test` in both **`source_us_east4`** and **`source_us_east4_cmek`** (same query template). The **Yes / Yes** and **Yes / No** `bq cp` commands can run against the CMEK source table directly.
 
-- **DTS**: BigQuery Data Transfer Service.
+- **DTS `cross_region_copy`**: BigQuery Data Transfer Service using the `cross_region_copy` `data_source_id` — a full-dataset copy across regions (the console "Copy dataset" flow).
+- **DTS `scheduled_query`**: BigQuery Data Transfer Service using the `scheduled_query` `data_source_id` — a per-query (DQL/DML) transfer. **Not cross-region capable** (see observation 6 and §1 finding).
 - **CRR**: Cross-region replication when the source-region replica in the destination dataset is the **primary** replica (copying into the destination works in these tests).
 - **CRR (secondary)**: Same replication setup, but the source-region replica in the destination dataset is still the **secondary** replica. In that state, **data cannot be copied into the destination dataset** until that replica is promoted to **primary** in the destination dataset.
 
 ## Observations
 
-1. **DTS** succeeded only when **source and destination CMEK usage matched** (both CMEK or both non-CMEK). It failed when one side used CMEK and the other did not.
-2. **`bq cp`** (cross-region **`us-east4` → `US`**) follows the **same CMEK pairing rule as DTS**: Pass in the **Yes / Yes** and **No / No** rows; Fail in the mixed rows, with BigQuery errors about CMEK unless you supply a destination key or do an in-region CMEK copy first.
+1. **DTS `cross_region_copy`** succeeded only when **source and destination CMEK usage matched** (both CMEK or both non-CMEK). It failed when one side used CMEK and the other did not. **DTS `scheduled_query`** failed in every CMEK combination for an unrelated reason (see observation 6).
+2. **`bq cp`** (cross-region **`us-east4` → `US`**) follows the **same CMEK pairing rule as DTS `cross_region_copy`**: Pass in the **Yes / Yes** and **No / No** rows; Fail in the mixed rows, with BigQuery errors about CMEK unless you supply a destination key or do an in-region CMEK copy first.
 3. **CRR** succeeded in **all four** combinations of source/destination CMEK.
 4. **CRR (secondary)** failed in every run: with the source-region replica still **secondary** in the destination dataset, copy/load into the destination was not possible. **Promoting that replica to primary** in the destination dataset is required before those operations can succeed.
 

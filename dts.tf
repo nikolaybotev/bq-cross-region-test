@@ -3,8 +3,20 @@
 #
 # DTS has no first-class “copy partition N only” transfer for cross-region BQ→BQ; the usual
 # pattern is a daily scheduled_query that filters on the partition column (incremental by day).
+#
+# EXPECTED FAILURE (cross-region):
+# scheduled_query runs as a regular BigQuery query in the DTS config's `location` (US here).
+# The source table lives in us-east4, so the US query planner cannot see it and returns:
+#   "Access Denied: Table …source_us_east4_cmek.sample_cross_region_test: …does not have
+#    permission to query …, or perhaps it does not exist."
+# This is a cross-region visibility error (not an IAM issue). Captured as an expected failure
+# scenario for CROSS_REGION_TEST_REPORT.md; mitigations: CRR + intermediate dataset, or
+# `cross_region_copy` DTS (see `dts_console_imported.tf`).
 
 locals {
+  # Google-managed BigQuery Data Transfer service agent (orchestrates runs; may impersonate a user SA).
+  bq_dts_service_agent = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+
   dts_dest_table_id = "dts_cmek_from_east4"
 
   # Idempotent daily load: merge yesterday’s partition from the seeded sample table.
@@ -20,36 +32,50 @@ WHEN NOT MATCHED THEN INSERT (id, label, created_at) VALUES (S.id, S.label, S.cr
 SQL
 }
 
-# Lets the BQ DTS service agent create query jobs (same pattern as provider docs for scheduled_query).
+# Scheduled transfers that set `service_account_name` run the query as this identity. The API rejects
+# configs without `service_account_name` / version_info in many projects ("Failed to find a valid credential").
+resource "google_service_account" "dts_scheduled_query_runner" {
+  account_id   = substr(replace("${var.name_prefix}-dts-sq", "_", "-"), 0, 30)
+  display_name = "${var.name_prefix} DTS scheduled query runner"
+  project      = var.gcp_project_id
+
+  depends_on = [google_project_service.required_apis["iam.googleapis.com"]]
+}
+
+# Lets the DTS service agent mint tokens to act as the runner SA (provider-recommended pattern).
 resource "google_project_iam_member" "bq_dts_service_agent_token_creator" {
   project = var.gcp_project_id
   role    = "roles/iam.serviceAccountTokenCreator"
-  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+  member  = local.bq_dts_service_agent
 }
 
-resource "google_project_iam_member" "bq_dts_service_agent_job_user" {
+# DTS must be allowed to attach / run as the user-managed runner SA.
+resource "google_service_account_iam_member" "bq_dts_can_use_runner_sa" {
+  service_account_id = google_service_account.dts_scheduled_query_runner.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = local.bq_dts_service_agent
+}
+
+resource "google_project_iam_member" "dts_runner_bigquery_job_user" {
   project = var.gcp_project_id
   role    = "roles/bigquery.jobUser"
-  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+  member  = google_service_account.dts_scheduled_query_runner.member
 }
 
-resource "google_bigquery_dataset_iam_member" "dts_can_read_source_cmek" {
+resource "google_bigquery_dataset_iam_member" "dts_runner_can_read_source_cmek" {
   dataset_id = google_bigquery_dataset.source_us_east4_cmek.dataset_id
   role       = "roles/bigquery.dataViewer"
-  member     = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+  member     = google_service_account.dts_scheduled_query_runner.member
 }
 
-resource "google_bigquery_dataset_iam_member" "dts_can_write_dest_us" {
+resource "google_bigquery_dataset_iam_member" "dts_runner_can_write_dest_us" {
   dataset_id = google_bigquery_dataset.dest_us.dataset_id
   role       = "roles/bigquery.dataEditor"
-  member     = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
+  member     = google_service_account.dts_scheduled_query_runner.member
 }
 
-resource "google_kms_crypto_key_iam_member" "bq_dts_service_agent_us_multi" {
-  crypto_key_id = google_kms_crypto_key.us_multi_bq_default.id
-  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com"
-}
+# CMEK wraps DEKs using the BigQuery service agent on `bq-…@bigquery-encryption.iam.gserviceaccount.com`
+# (see google_kms_crypto_key_iam_member.bq_service_agent_us_multi in kms.tf), not the query runner SA.
 
 resource "google_bigquery_table" "dts_dest_cmek_incremental" {
   dataset_id = google_bigquery_dataset.dest_us.dataset_id
@@ -77,10 +103,11 @@ resource "google_bigquery_data_transfer_config" "incremental_cmek_scheduled_quer
   data_source_id = "scheduled_query"
   schedule       = "every day 07:00"
 
+  service_account_name = google_service_account.dts_scheduled_query_runner.email
+
   destination_dataset_id = google_bigquery_dataset.dest_us.dataset_id
 
   params = {
-    destination_table_name_template = local.dts_dest_table_id
     write_disposition               = "WRITE_APPEND"
     query                           = local.dts_incremental_merge_query
   }
@@ -91,10 +118,11 @@ resource "google_bigquery_data_transfer_config" "incremental_cmek_scheduled_quer
 
   depends_on = [
     google_project_iam_member.bq_dts_service_agent_token_creator,
-    google_project_iam_member.bq_dts_service_agent_job_user,
-    google_bigquery_dataset_iam_member.dts_can_read_source_cmek,
-    google_bigquery_dataset_iam_member.dts_can_write_dest_us,
-    google_kms_crypto_key_iam_member.bq_dts_service_agent_us_multi,
+    google_service_account_iam_member.bq_dts_can_use_runner_sa,
+    google_project_iam_member.dts_runner_bigquery_job_user,
+    google_bigquery_dataset_iam_member.dts_runner_can_read_source_cmek,
+    google_bigquery_dataset_iam_member.dts_runner_can_write_dest_us,
+    google_kms_crypto_key_iam_member.bq_service_agent_us_multi,
     google_bigquery_table.dts_dest_cmek_incremental,
   ]
 }

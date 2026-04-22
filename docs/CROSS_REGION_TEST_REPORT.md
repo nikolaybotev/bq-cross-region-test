@@ -11,14 +11,18 @@ Manual tests performed in the Google Cloud Console using datasets and KMS keys p
 | No  | Yes | ❌ Fail | ❌ Fail | ❌ Fail | ✅ Pass | ❌ Fail |
 | No  | No  | ✅ Pass | ❌ Fail | ✅ Pass | ✅ Pass | ❌ Fail |
 
-The BigQuery Data Transfer Service exposes two different `data_source_id`s that people reach for when moving data across regions, and the matrix treats them separately because they behave very differently:
+### Legend
 
-- **`cross_region_copy`** — a full-dataset copy across regions. This is what the Google Cloud Console "Copy dataset" flow creates. It's the cross-region–capable DTS data source and its results line up with `bq cp` on CMEK.
-- **`scheduled_query`** — a DTS transfer whose work is a BigQuery SQL query (DQL or DML). It's **not cross-region capable**: the query runs in the destination dataset's region, so if your source lives in a different region the query simply can't read it. That's why the `scheduled_query` column is ❌ in every row, independent of CMEK.
+- **Source CMEK** / **Dest CMEK** — whether the **source** / **destination** dataset has a default CMEK (Cloud KMS customer-managed encryption key) configured. **Yes** = dataset default is a CMEK; **No** = Google-managed default encryption.
+- **DTS `cross_region_copy`** — BigQuery Data Transfer Service using the `cross_region_copy` `data_source_id`: a full-dataset copy across regions (the Google Cloud Console "Copy dataset" flow). Pass/fail pattern matches `bq cp` on CMEK.
+- **DTS `scheduled_query`** — BigQuery Data Transfer Service using the `scheduled_query` `data_source_id`: a per-query (DQL/DML) transfer. **Not cross-region capable** — the query runs in the destination dataset's region and therefore cannot read a table that lives in a different region. That is why this column is ❌ in every row, independent of CMEK. See observation 6 and the finding in §1 for details.
+- **`bq cp`** — the `bq` CLI cross-region copy (`us-east4` → `US`) via the BigQuery copy API. Mixed-CMEK rows fail unless you pass **`--destination_kms_key`** or stage through an in-region CMEK copy.
+- **CRR** — cross-region dataset replication with the source-region replica in the destination dataset as the **primary** replica (copying into the destination works in these tests).
+- **CRR (secondary)** — same replication setup, but the source-region replica in the destination dataset is still the **secondary** (read-only) replica. Copy/load into the destination is rejected until that replica is **promoted to primary**.
 
-See observation 6 below and the finding in §1 for details.
+### `bq cp` commands used for the matrix
 
-Cross-region **`bq cp`** (**`us-east4` → `US`**) for `sample_cross_region_test` (project `feelinsosweet`). Example destination IDs use the `from_us_east4*` suffix to distinguish scenarios. **`bq cp`** matches **DTS `cross_region_copy`** on CMEK: Pass when source and destination are both CMEK or both non-CMEK; mixed CMEK fails unless you use **`--destination_kms_key`** or an in-region CMEK staging copy, as BigQuery's errors describe.
+Project `feelinsosweet`; `sample_cross_region_test` is created in both `source_us_east4` and `source_us_east4_cmek` by Terraform (same query template). Destination IDs use the `from_us_east4*` suffix to distinguish scenarios.
 
 ```bash
 # Yes / Yes — CMEK → CMEK
@@ -41,13 +45,6 @@ bq cp -f \
   feelinsosweet:source_us_east4.sample_cross_region_test \
   feelinsosweet:dest_us.from_us_east4
 ```
-
-Terraform creates partitioned `sample_cross_region_test` in both **`source_us_east4`** and **`source_us_east4_cmek`** (same query template). The **Yes / Yes** and **Yes / No** `bq cp` commands can run against the CMEK source table directly.
-
-- **DTS `cross_region_copy`**: BigQuery Data Transfer Service using the `cross_region_copy` `data_source_id` — a full-dataset copy across regions (the console "Copy dataset" flow).
-- **DTS `scheduled_query`**: BigQuery Data Transfer Service using the `scheduled_query` `data_source_id` — a per-query (DQL/DML) transfer. **Not cross-region capable** (see observation 6 and §1 finding).
-- **CRR**: Cross-region replication when the source-region replica in the destination dataset is the **primary** replica (copying into the destination works in these tests).
-- **CRR (secondary)**: Same replication setup, but the source-region replica in the destination dataset is still the **secondary** replica. In that state, **data cannot be copied into the destination dataset** until that replica is promoted to **primary** in the destination dataset.
 
 ## Observations
 

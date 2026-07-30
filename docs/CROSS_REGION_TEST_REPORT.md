@@ -124,7 +124,7 @@ Adjust ring/key names if you changed `name_prefix` in Terraform.
     ) AS S
     ON T.id = S.id AND DATE(T.created_at) = DATE(S.created_at)
     WHEN NOT MATCHED THEN INSERT (id, label, created_at) VALUES (S.id, S.label, S.created_at)
-SQL
+    SQL
   }
 
   resource "google_bigquery_table" "dts_dest_cmek_incremental" {
